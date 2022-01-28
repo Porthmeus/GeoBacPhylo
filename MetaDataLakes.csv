@@ -1,0 +1,22 @@
+SiteID,waterbody,Plant_cover,Name,lon,lat,NutrientLoad,Waterbody2
+M26,River,65,Hortobágy,21.14895,47.58746,1,River
+M28,Lake,65,Tiszadorogma,20.86334,47.67119,2,Oxbow lake
+M31,Lake,75,Balatonkenese,18.06975,47.04021,2,Lake
+M34,River,60,Keszthely,17.26994,46.76484,2,Canal
+M44,Lake,25,Tiszalúc,21.07803,48.03405,1,Oxbow lake
+M67,River,5,Cece,18.61604,46.76848,1,River
+M70,River,45,Balatonboglár,17.63603,46.77169,3,Creek
+M71,River,5,Fonyód,17.56861,46.75138,2,Creek
+M72,River,25,Balatonmáriafürdő,17.38126,46.70316,1,Canal
+M78,River,5,Négyes,20.68656,47.69665,3,Creek
+M79,River,35,Tiszavalk,20.74361,47.69032,1,Canal
+M83,Lake,25,Gávavencsellő,21.61385,48.17484,2,Oxbow lake
+M84,Lake,35,Fegyvernek,20.52008,47.26047,1,Oxbow lake
+M85,Lake,25,Szajol,20.31362,47.17998,1,Oxbow lake
+M86,Lake,15,Szandaszőlős,20.25956,47.14387,1,Oxbow lake
+M89,Lake,30,Lakitelek,19.99031,46.85608,1,Oxbow lake
+M90,Lake,40,Tiszaalpár,20.00077,46.82147,1,Oxbow lake
+M107,Lake,25,Szabolcs,21.50517,48.17199,2,Oxbow lake
+M108,Lake,25,Rakamaz,21.44716,48.12438,2,Oxbow lake
+M109,Lake,25,Tiszabábolna,20.82135,47.68255,1,Oxbow lake
+R12,River,5,Calinesti-Oas,23.31119,47.88977,3,River

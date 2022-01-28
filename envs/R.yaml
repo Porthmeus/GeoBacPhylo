@@ -1,0 +1,32 @@
+channels:
+- conda-forge
+- bioconda
+- ajutla
+- r
+dependencies:
+- R>3.6
+- r-devtools
+- bioconductor-biomformat 
+- bioconductor-phyloseq
+- r-cowplot
+- r-svglite
+- r-effsize
+- r-knitr
+- r-rmarkdown
+- r-umap
+- r-MASS
+- r-geosphere
+- r-nlme
+- r-lme4
+- r-car
+- bioconductor-deseq2
+- r-pals
+- r-latticeextra
+- r-hmisc
+- r-zcompositions
+- r-pheatmap
+- r-ggplot2
+- r-vegan
+- bioconductor-deseq2
+- r-data.table
+- r-jtools

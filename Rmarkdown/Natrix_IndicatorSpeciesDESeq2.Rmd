@@ -1,0 +1,476 @@
+---
+title: "Indicator Species"
+author: "Jan Taubenheim"
+date: "01/20/2021"
+output: html_document
+---
+
+```{r setup, message=FALSE}
+
+# setup logfile
+log <- file(snakemake@log[[1]], open = "wt")
+sink(log)
+sink(log, type = "message")
+
+# don't print warnings and messages in the final document
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+require(data.table)
+require(DESeq2)
+if(!("qiime2R" %in% installed.packages()[,"Package"])){
+    devtools::install_github("jbisanz/qiime2R")
+}
+require(qiime2R)
+require(ggplot2)
+require(vegan)
+require(phyloseq)
+require(cowplot)
+require(pheatmap)
+require(pals)
+
+
+```
+
+
+The idea of this analysis is to use the DESeq2 framework for inference of indicator species for different (populations,) species and reproductive mode of Hydra microbiomes from Hungary.
+
+```{r debuggin, eval = FALSE, echo =FALSE}
+# set this part to eval =FALSE, before running snakemake, as it is meant for
+# debugging and testing. I will create an S4 object matching the one snakemake
+# parses, so that I can use the code as is downstream
+
+setClass("snakemake", representation(input = "list", output = "list"))
+snakemake <- new("snakemake", 
+                    input = list(
+                        AbFilt_FT = "../data/dada2_AbFilt_FT.csv",
+                        AbFilt_Tax = "../data/dada2_AbFilt_Tax.csv",
+                        AbFilt_meta = "../data/dada2_AbFilt_meta.csv",
+                        AbFilt_fasta_tree = "../data/dada2_AbFilt_fasta_tree.qza",
+                        MetaLakes = "../MetaDataLakes.csv"
+                    ),
+                    output = list(
+                        html = "Natrix_IndicatorSpeciesDESeq2.html"
+                    )
+                )
+
+```
+
+```{r loadData}
+
+otu <- read.csv(snakemake@input[["AbFilt_FT"]], row.names = 1) #"../data/dada2_AbFilt_FT.csv"
+tax <- read.csv(snakemake@input[["AbFilt_Tax"]], row.names=1)#"../data/dada2_AbFilt_Tax.csv"
+meta <- read.csv(snakemake@input[["AbFilt_meta"]], row.names=1)#"../data/dada2_AbFilt_meta.csv"
+tree <- read_qza(snakemake@input[["AbFilt_fasta_tree"]])$data #"../data/dada2_AbFilt_fasta_tree.qza"
+
+# add a count to facilitate log transformations
+otu2 <- otu+1
+
+# remap the reproductive data to more simple index
+map_vect <- c("SEX","NR","SEX","ASEX","SEX","SEX","SEX","SEX")
+names(map_vect) <- unique(meta$ReproductiveMode)
+meta[["ReproductiveModeSimple"]] <- map_vect[meta[["ReproductiveMode"]]]
+
+phy <- phyloseq(otu_table(otu, taxa_are_rows = TRUE),
+                tax_table(as.matrix(tax)),
+                sample_data(meta),
+                phy_tree(tree))
+
+```
+
+
+```{r runDeseq}
+
+dds <- DESeqDataSetFromMatrix(otu2[,rownames(meta)], colData = meta, design = ~ReproductiveModeSimple + Species + PopID)
+deseq <- DESeq(dds)
+#deseq1 <- DESeq(dds, betaPrior = TRUE)
+
+```
+
+```{r getResults}
+
+# get the differentials for Reproductive mode and Species
+resultsList <- list()
+combSpecies <- combn(unique(colData(deseq)[["Species"]]),2)
+combSex <- combn(unique(colData(deseq)[["ReproductiveModeSimple"]]),2)
+combSS <- list(Species = combSpecies,ReproductiveModeSimple = combSex)
+for(comb in names(combSS)){
+    combS <- combSS[[comb]]
+    rslt <- list()
+    for(i in 1:ncol(combS)){
+        rslt[[paste(combS[,i], collapse = "_vs_")]]<- results(deseq, 
+                contrast = c(comb,
+                             as.character(combS[1,i]),as.character(combS[2,i])),
+                alpha=0.05)
+    }
+    resultsList[[comb]] <- rslt
+}
+
+for(variable in names(resultsList)){
+    for(comparison in names(resultsList[[variable]])){
+    print(paste(variable, comparison))
+    print(summary(resultsList[[variable]][[comparison]]))
+    }
+}
+
+#resultsPopID <- list()
+#compPopID <- grep("PopID", resultsNames(deseq1), value = TRUE)
+#for(i in 1:length(compPopID)){
+#    resultsPopID[[compPopID[i]]] <- results(deseq1, contrast = list(compPopID[i], compPopID[-i]))
+#}
+
+difESV <- list()
+for(n in names(resultsList)){
+    for(comp in resultsList[[n]]){
+            compSel <- comp$padj < 0.05 & !is.na(comp$padj)
+            difESV[[n]] <- unique(c(difESV[[n]], rownames(comp[compSel,])))
+    }
+}
+
+
+```
+
+In total there are `r length(difESV$Species)` and `r length(difESV$ReproductiveModeSimple)` differentially abundant ESV between Species and Reproductive mode, respectively. Lets visualize that and plot the fold changes for each of them in the different comparisons. 
+
+```{r ESVplot, fig.width = 12, fig.height = 8}
+
+SpeciesSexPlot <- list()
+resVals <- list()
+for(cdt in names(resultsList)){
+    cdtPlots <- list()
+    res <- list()
+    for(comp in names(resultsList[[cdt]])){
+        compR <- as.data.frame(resultsList[[cdt]][[comp]])
+        fl <- merge(compR, tax[,-8], by = 0)
+        fl <- fl[fl[["padj"]] < 0.05 & !is.na(fl[["padj"]]),]
+        #fl <- fl[order(abs(fl[["log2FoldChange"]]))[1:20],]
+        fl[["ESV"]] <- sapply(fl[["Row.names"]], function(x) {paste(collapse="", strsplit(as.character(x), split ="")[[1]][1:6])})
+        xlb <- paste(collapse = " ", strsplit(comp, split = "_")[[1]][c(3,2,1)])
+        pp <- ggplot(fl, aes(x=log2FoldChange, y = ESV, fill = Phylum)) +
+            geom_bar(stat ="identity") +
+            geom_errorbar(aes(xmin = log2FoldChange - lfcSE, xmax = log2FoldChange + lfcSE))+
+            xlab(xlb)
+        cdtPlots[[comp]] <- pp
+        res[[comp]] <- fl
+    }
+    SpeciesSexPlot[[cdt]] <- cowplot::plot_grid(plotlist = cdtPlots, nrow=1)
+    resVals[[cdt]] <- res
+}
+
+SpeciesSexPlot[[1]]
+SpeciesSexPlot[[2]]
+
+```
+
+Lets check the result also in a heatmap. The OTU matrix is very sparse, thus it might be that the effects are not really visible at this level of resolution.
+
+```{r heatmapESV, fig.width = 16, fig.height = 12}
+
+#resNames <- results(deseq)
+#vennList <- list()
+#for(n in names(resVals)){
+#    res <- resVals[[n]]
+#    lvls <- unique(unlist(strsplit(names(res), split = "_vs_")))
+#    vennMat <- matrix(0,
+#                      ncol = length(lvls), 
+#                      nrow = nrow(resNames),
+#                      dim = list(x= rownames(resNames),
+#                                 y = lvls)
+#                      )
+#
+#    for(m in lvls){
+
+        
+vst <- varianceStabilizingTransformation(deseq, fitType='local')        
+
+
+variable <- names(difESV)[1]
+# define custom colors
+colSpecies <- polychrome(length(unique(meta$Species)))
+colPopID <- polychrome(length(unique(meta$PopID)))
+colReproductiveModeSimple <- polychrome(length(unique(meta$ReproductiveModeSimple)))
+colPhylum <- polychrome(length(unique(tax[difESV[[variable]],"Phylum"])))
+colClass <- polychrome(length(unique(tax[difESV[[variable]],"Class"])))
+names(colSpecies) <- unique(meta$Species)
+names(colPopID) <- unique(meta$PopID)
+names(colReproductiveModeSimple) <- unique(meta$ReproductiveModeSimple)
+names(colPhylum) <- unique(tax[difESV[[variable]],"Phylum"])
+names(colClass) <- unique(tax[difESV[[variable]],"Class"])
+anno_colors <- list(Species = colSpecies,
+                    PopID = colPopID,
+                    ReproductiveModeSimple = colReproductiveModeSimple,
+                    Phylum = colPhylum,
+                    Class = colClass)
+
+Species_pp <- pheatmap(assay(vst)[difESV[[variable]],],
+                   main=variable, 
+                   scale="row",
+                   annotation_col= meta[,c("Species","PopID","ReproductiveModeSimple")],
+                   annotation_row= tax[difESV[[variable]],c("Phylum","Class")],
+                   show_colnames=FALSE,
+                   show_rownames=FALSE,
+                   annotation_colors=anno_colors)
+Species_pp
+
+variable <- names(difESV)[2]
+
+# define custom colors
+colSpecies <- polychrome(length(unique(meta$Species)))
+colPopID <- polychrome(length(unique(meta$PopID)))
+colReproductiveModeSimple <- polychrome(length(unique(meta$ReproductiveModeSimple)))
+colPhylum <- polychrome(length(unique(tax[difESV[[variable]],"Phylum"])))
+colClass <- polychrome(length(unique(tax[difESV[[variable]],"Class"])))
+names(colSpecies) <- unique(meta$Species)
+names(colPopID) <- unique(meta$PopID)
+names(colReproductiveModeSimple) <- unique(meta$ReproductiveModeSimple)
+names(colPhylum) <- unique(tax[difESV[[variable]],"Phylum"])
+names(colClass) <- unique(tax[difESV[[variable]],"Class"])
+
+anno_colors <- list(Species = colSpecies,
+                    PopID = colPopID,
+                    ReproductiveModeSimple = colReproductiveModeSimple,
+                    Phylum = colPhylum,
+                    Class = colClass)
+
+Sex_pp <- pheatmap(assay(vst)[difESV[[variable]],],
+                   main=variable,
+                   scale="row",
+                   annotation_col= meta[,c("Species","PopID","ReproductiveModeSimple")],
+                   annotation_row= tax[difESV[[variable]],c("Phylum","Class")],
+                   show_colnames=FALSE,
+                   show_rownames=FALSE,
+                   annotation_colors=anno_colors)
+Sex_pp
+
+
+```
+
+
+OK as suspected, this is very sparse on data, thus it might be advisable to cluster the data at some level of phylogeny. So lets do this.
+
+```{r clusterPhylogeny}
+
+# rename strange names to unknown, where basically unknown is suitable
+unknown <- c("uncultured", "metagenome","Unassigned")
+tax2 <- tax
+for(clm in colnames(tax2)){
+    if(clm != "rep.seq"){
+        x <- tax2[,clm]
+        tax2[is.na(x),clm] <- "unknown"
+        for(pattern in unknown){
+            sel <- grep(pattern, x)
+            tax2[sel,clm] <- "unknown"
+        }
+    }
+}
+
+# merge into phylogeny into new vector for easier access
+for(i in 2:7){
+    nm <- paste0(colnames(tax2)[i],"_phylo")
+    tax2[[nm]] <- apply(tax2[,1:i],1,paste, collapse="_")
+}
+
+# now lets sum the reads per unique phylo description
+clustered_otu <- list()
+for(clm in grep("_phylo",names(tax2), value =TRUE)){
+    otu_mat <- matrix(0, ncol = ncol(otu), nrow= length(unique(tax2[,clm])),
+                      dimnames = list(unique(tax2[,clm]), colnames(otu)))
+    for(taxa in unique(tax2[,clm])){
+        ids <- rownames(tax2)[tax2[,clm] == taxa]
+        otu_mat[taxa,] <- apply(otu[ids,],2,sum)
+    }
+    clustered_otu[[clm]] <- otu_mat
+}
+
+# run deseq on the clustered data
+deseqPhylo <- list()
+for(phylo in names(clustered_otu)){
+    dds <- DESeqDataSetFromMatrix(clustered_otu[[phylo]][,rownames(meta)]+1, colData = meta, design = ~ReproductiveModeSimple + Species + PopID)
+    deseq <- DESeq(dds)
+    deseqPhylo[[phylo]] <- deseq
+}
+
+
+
+# get the differentials for Reproductive mode and Species
+resultsPhylo <- list()
+for(phylo in names(deseqPhylo)){
+    deseq <- deseqPhylo[[phylo]]
+    print(phylo)
+    resultsList <- list()
+    combSpecies <- combn(unique(colData(deseq)[["Species"]]),2)
+    combSex <- combn(unique(colData(deseq)[["ReproductiveModeSimple"]]),2)
+    combSS <- list(Species = combSpecies,ReproductiveModeSimple = combSex)
+    for(comb in names(combSS)){
+        combS <- combSS[[comb]]
+        rslt <- list()
+        for(i in 1:ncol(combS)){
+            rslt[[paste(combS[,i], collapse = "_vs_")]]<- results(deseq, 
+                    contrast = c(comb,
+                                 as.character(combS[1,i]),as.character(combS[2,i])),
+                    alpha=0.05)
+        }
+        resultsList[[comb]] <- rslt
+    }
+#
+    for(variable in names(resultsList)){
+        for(comparison in names(resultsList[[variable]])){
+        print(paste(variable, comparison))
+        print(summary(resultsList[[variable]][[comparison]]))
+        }
+    }
+    resultsPhylo[[phylo]] <- resultsList
+}
+
+```
+
+OK now we have results for all the different phylogentic levels. Lets plot these again.
+
+```{r effectSizePlot, fig.width = 32, fig.height = 12}
+
+clmns <- names(tax2)[1:7]
+effectPhylo <- list()
+for(phylo in names(resultsPhylo)){
+    resultsList <- resultsPhylo[[phylo]]
+    SpeciesSexPlot <- list()
+    #
+    for(cdt in names(resultsList)){
+        cdtPlots <- list()
+        #
+        for(comp in names(resultsList[[cdt]])){
+            compR <- as.data.frame(resultsList[[cdt]][[comp]])
+            fl <- compR
+            fl <- fl[fl[["padj"]] < 0.05 & !is.na(fl[["padj"]]),]
+            if(nrow(fl) >0){
+                fl[["Level"]] <-sapply(rownames(fl),
+                                       function(x) {
+                                           length(strsplit(x, split ="_")[[1]])
+                                       }
+                )
+                #
+                fnLev <- clmns[fl[1,"Level"]]
+                fl[[fnLev]] <- paste(1:nrow(fl),
+                                     sapply(rownames(fl),
+                                                       function(x) {
+                                                           y <- strsplit(x, split ="_")[[1]] 
+                                                           return(y[length(y)])
+                                                       }
+                                            ),
+                                     sep = "_")
+                #
+                preLev <- clmns[fl[1,"Level"]-1]
+                fl[[preLev]] <- sapply(rownames(fl),
+                                       function(x) {
+                                           y <- strsplit(x, split ="_")[[1]]
+                                           return(y[length(y)-1])})
+                #
+                fl[["Phylum"]]<- sapply(rownames(fl),
+                                       function(x) {
+                                           y <- strsplit(x, split ="_")[[1]]
+                                           return(y[2])})
+                #
+                xlb <- paste(collapse = " ", strsplit(comp, split = "_")[[1]][c(3,2,1)])
+                pp <- ggplot(fl, aes_string(x="log2FoldChange", y = fnLev, fill = preLev, color = "Phylum")) +
+                    geom_bar(stat ="identity") +
+                    geom_errorbar(aes(xmin = log2FoldChange - lfcSE, xmax = log2FoldChange + lfcSE))+
+                    xlab(xlb) +
+                    ggtitle(phylo) +
+                    scale_color_manual(values = c(as.vector(polychrome()),"white")) +
+                    scale_fill_manual(values = c(as.vector(polychrome()),"white")) 
+                cdtPlots[[comp]] <- pp
+            }
+        }
+        SpeciesSexPlot[[cdt]] <- cowplot::plot_grid(plotlist = cdtPlots, nrow=1)
+    }
+#
+    print(SpeciesSexPlot[[1]])
+    print(SpeciesSexPlot[[2]])
+    effectPhylo[[phylo]] <- SpeciesSexPlot
+}
+
+```
+
+This is nice (a little colorful though). Lets see whether heatmaps look better on these here.
+
+```{r heatmaps2, fig.width=16, fig.height=12}
+
+for(phylo in names(deseqPhylo)){
+    resultsList <- resultsPhylo[[phylo]]
+    deseq <- deseqPhylo[[phylo]]
+
+    difESV <- list()
+    for(n in names(resultsList)){
+        for(comp in resultsList[[n]]){
+                compSel <- comp$padj < 0.05 & !is.na(comp$padj)
+                difESV[[n]] <- unique(c(difESV[[n]], rownames(comp[compSel,])))
+        }
+    }
+
+    vst <- varianceStabilizingTransformation(deseq, fitType='local')        
+
+
+    variable <- names(difESV)[1]
+    # define custom colors
+    colSpecies <- polychrome(length(unique(meta$Species)))
+    colPopID <- polychrome(length(unique(meta$PopID)))
+    colReproductiveModeSimple <- polychrome(length(unique(meta$ReproductiveModeSimple)))
+    colPhylum <- polychrome(length(unique(tax2[tax2[[phylo]] %in% difESV[[variable]],"Phylum"])))
+    colClass <- polychrome(length(unique(tax2[tax2[[phylo]] %in% difESV[[variable]],"Class"])))
+    names(colSpecies) <- unique(meta$Species)
+    names(colPopID) <- unique(meta$PopID)
+    names(colReproductiveModeSimple) <- unique(meta$ReproductiveModeSimple)
+    names(colPhylum) <- unique(tax2[tax2[[phylo]] %in% difESV[[variable]],"Phylum"])
+    names(colClass) <- unique(tax2[tax2[[phylo]] %in% difESV[[variable]],"Class"])
+    anno_colors <- list(Species = colSpecies,
+                        PopID = colPopID,
+                        ReproductiveModeSimple = colReproductiveModeSimple,
+                        Phylum = colPhylum,
+                        Class = colClass)
+
+    tax3 <- tax2[!duplicated(tax2[[phylo]]),]
+    rownames(tax3) <- tax3[[phylo]]
+    tax3 <- tax3[rownames(vst),]
+    Species_pp <- pheatmap(assay(vst)[difESV[[variable]],],
+                       main=paste(phylo, variable), 
+                       scale="row",
+                       annotation_col= meta[,c("Species","PopID","ReproductiveModeSimple")],
+                       annotation_row= tax3[tax3[[phylo]] %in% difESV[[variable]],c("Phylum","Class")],
+                       show_colnames=FALSE,
+                       show_rownames=FALSE,
+                       annotation_colors=anno_colors)
+    Species_pp
+
+
+    variable <- names(difESV)[2]
+    # define custom colors
+    colSpecies <- polychrome(length(unique(meta$Species)))
+    colPopID <- polychrome(length(unique(meta$PopID)))
+    colReproductiveModeSimple <- polychrome(length(unique(meta$ReproductiveModeSimple)))
+    colPhylum <- polychrome(length(unique(tax2[tax2[[phylo]] %in% difESV[[variable]],"Phylum"])))
+    colClass <- polychrome(length(unique(tax2[tax2[[phylo]] %in% difESV[[variable]],"Class"])))
+    names(colSpecies) <- unique(meta$Species)
+    names(colPopID) <- unique(meta$PopID)
+    names(colReproductiveModeSimple) <- unique(meta$ReproductiveModeSimple)
+    names(colPhylum) <- unique(tax2[tax2[[phylo]] %in% difESV[[variable]],"Phylum"])
+    names(colClass) <- unique(tax2[tax2[[phylo]] %in% difESV[[variable]],"Class"])
+    anno_colors <- list(Species = colSpecies,
+                        PopID = colPopID,
+                        ReproductiveModeSimple = colReproductiveModeSimple,
+                        Phylum = colPhylum,
+                        Class = colClass)
+
+    tax3 <- tax2[!duplicated(tax2[[phylo]]),]
+    rownames(tax3) <- tax3[[phylo]]
+    tax3 <- tax3[rownames(vst),]
+    Species_pp <- pheatmap(assay(vst)[difESV[[variable]],],
+                       main=paste(phylo, variable), 
+                       scale="row",
+                       annotation_col= meta[,c("Species","PopID","ReproductiveModeSimple")],
+                       annotation_row= tax3[tax3[[phylo]] %in% difESV[[variable]],c("Phylum","Class")],
+                       show_colnames=FALSE,
+                       show_rownames=FALSE,
+                       annotation_colors=anno_colors)
+    Species_pp
+}
+
+```
+

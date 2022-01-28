@@ -1,0 +1,1 @@
+This is an evaluation of the set filters for denoising the data. It contains filters for how much of information is contributed from each bacterium and in how many samples each bacterium is represented.

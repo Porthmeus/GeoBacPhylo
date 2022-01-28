@@ -1,0 +1,12 @@
+results/
+logs/
+data/
+reports/
+FilterThrl/
+.snakemake/
+temp/
+temp*
+plots/
+Manuscript/figures/*
+Manuscript/Panels/*
+Manuscript/tables/*

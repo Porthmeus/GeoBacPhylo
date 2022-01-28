@@ -1,0 +1,1 @@
+The file contains a visualization for a barplot, which represents the relative abundances of the found taxa in the samples. For visualization and certain amount of customization load the file here: https://view.qiime2.org
