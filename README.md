@@ -12,5 +12,17 @@ This will run the basic analysis in order to create the readcount matrix, 16S se
 
 In order to recreate the plots and statistics of the manuscript one can run the scripts in the `Manuscript` directory after the relevant data has been generated.
 
+## Data
+
+You can find the most important data from the experiment, without rerunning the analysis, in `Manuscript/Data`. 
+
+| File                         | Description                                                        |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `dada2_AbFilt_fasta.fasta` | Contains the sequence information for the reconstructed ASVs       |
+| `dada2_AbFilt_FT.csv`      | The feature count table, containing the abundances of the bacteria |
+| `dada2_AbFilt_meta.csv`    | Metadata for the samples                                           |
+| `dada2_AbFilt_Tax.csv`     | Taxonomic information for the ASVs                                 |
 
 For further questions and help raise an issue here on github or contact Jan Taubenheim (corresponding author of the original manuscript).
+
+
